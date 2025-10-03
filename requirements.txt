@@ -1,0 +1,10 @@
+streamlit
+opensearch-py
+python-dotenv
+requests
+pandas
+boto3
+crewai
+crewai-tools
+langchain-openai
+langchain

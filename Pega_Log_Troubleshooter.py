@@ -8,21 +8,57 @@ except ImportError:
 
 import json, html, re, os
 import requests
-from opensearchpy import exceptions
 import streamlit as st
 import uuid
 from dotenv import load_dotenv
-from opensearchpy import OpenSearch, helpers
-from crewai import Agent, Task, Crew
-from crewai_tools import SerperDevTool
-from crewai.tools import BaseTool
-from langchain_openai import ChatOpenAI
-from langchain.memory import ConversationBufferWindowMemory
 import ast, warnings, asyncio
 import pandas as pd
 import datetime, time
 from io import StringIO
 import boto3
+
+# --- Optional / External Dependencies with Graceful Fallbacks ---
+missing_deps = []
+
+try:
+    from opensearchpy import exceptions, OpenSearch, helpers
+except ModuleNotFoundError:
+    exceptions = None  # type: ignore
+    OpenSearch = None  # type: ignore
+    helpers = None  # type: ignore
+    missing_deps.append("opensearch-py")
+
+try:
+    from crewai import Agent, Task, Crew
+    from crewai_tools import SerperDevTool
+    from crewai.tools import BaseTool
+except ModuleNotFoundError:
+    Agent = Task = Crew = SerperDevTool = BaseTool = None  # type: ignore
+    missing_deps.append("crewai / crewai-tools")
+
+try:
+    from langchain_openai import ChatOpenAI
+    from langchain.memory import ConversationBufferWindowMemory
+except ModuleNotFoundError:
+    ChatOpenAI = ConversationBufferWindowMemory = None  # type: ignore
+    missing_deps.append("langchain-openai / langchain")
+
+if missing_deps:
+    st.warning(
+        "Some optional dependencies are missing: " + ", ".join(missing_deps) +
+        "\n\nInstall them with: pip install -r requirements.txt",
+        icon="⚠️"
+    )
+
+# Minimal fallback for BaseTool so the app doesn't crash if crewai isn't installed
+if 'crewai / crewai-tools' in missing_deps and 'BaseTool' in globals() and BaseTool is None:  # type: ignore
+    class BaseTool:  # type: ignore
+        name: str = "BaseToolFallback"
+        description: str = "Fallback tool base when crewai is missing."
+        def __init__(self, *_, **__):
+            pass
+        def _run(self, *_args, **_kwargs):
+            return {"error": "crewai not installed. Install dependencies for full functionality."}
 
 # Load environment variables
 load_dotenv()
@@ -66,15 +102,22 @@ except RuntimeError:
     asyncio.set_event_loop(loop)
 
 # --- OpenSearch Client ---
-client = OpenSearch(
-        hosts=[OPENSEARCH_URL],
-        http_auth=(OPENSEARCH_USER, OPENSEARCH_PASS),
-        verify_certs=False,
-        ssl_show_warn=False,
-        timeout=30,
-        max_retries=3,
-        retry_on_timeout=True
-    )
+if OpenSearch is not None and OPENSEARCH_URL and OPENSEARCH_USER and OPENSEARCH_PASS:
+    try:
+        client = OpenSearch(
+            hosts=[OPENSEARCH_URL],
+            http_auth=(OPENSEARCH_USER, OPENSEARCH_PASS),
+            verify_certs=False,
+            ssl_show_warn=False,
+            timeout=30,
+            max_retries=3,
+            retry_on_timeout=True
+        )
+    except Exception as _e:
+        st.error(f"Failed to initialize OpenSearch client: {_e}")
+        client = None
+else:
+    client = None
 
 # --- Streamlit Configuration ---
 st.set_page_config(
