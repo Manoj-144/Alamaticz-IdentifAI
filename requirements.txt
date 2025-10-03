@@ -27,9 +27,6 @@ requests==2.32.3
 python-dotenv==1.0.1
 boto3==1.34.131            # S3 feedback storage
 
-# SQLite compatibility hack (import pysqlite3)
-pysqlite3-binary==0.5.2
-
 # NOTE: Streamlit pulls in needed transitive deps (protobuf, tornado, etc.)
 # Keep this list lean to reduce cold start time & attack surface.
 
