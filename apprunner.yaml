@@ -1,3 +1,8 @@
+version: 1.0
+
+# AWS App Runner configuration (source code deployment)
+# NOTE: Use spaces only (no tabs). Indentation is 2 spaces per level.
+
 runtime: python3
 runtime_version: 3.11
 
@@ -6,7 +11,42 @@ build:
 		build:
 			- pip install --upgrade pip
 			- pip install -r requirements.txt
+	env:
+		- name: PIP_NO_CACHE_DIR
+			value: "1"
+
 run:
 	command: streamlit run Pega_Log_Troubleshooter.py --server.port 8080 --server.headless true --server.address 0.0.0.0
 	network:
 		port: 8080
+	env:
+		- name: PYTHONUNBUFFERED
+			value: "1"
+
+health_check:
+	path: /
+	interval: 10
+	timeout: 5
+	healthy_threshold: 1
+	unhealthy_threshold: 5
+
+# Environment variables (prefer setting sensitive ones as secrets in console)
+# run:
+#   env:
+#     - name: OPENSEARCH_URL
+#       value: https://your-domain
+#     - name: INDEX_NAME
+#       value: logs-index
+#     - name: OPENAI_API_KEY
+#       value: PLACEHOLDER   # store as secret instead
+
+# Optional autoscaling (uncomment to customize)
+# autoscaling:
+#   concurrency: 50
+#   max_size: 5
+#   min_size: 1
+
+# If you want to use your Dockerfile instead:
+# 1. Delete this file
+# 2. Build & push image to ECR
+# 3. Create an App Runner service from the container image
