@@ -1,0 +1,38 @@
+version: "3.9"
+services:
+  opensearch:
+    image: opensearchproject/opensearch:2.13.0
+    container_name: opensearch
+    environment:
+      - discovery.type=single-node
+      - OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m
+      - plugins.security.disabled=true
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    ports:
+      - "9200:9200"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9200"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  app:
+    build: .
+    container_name: log-troubleshooter
+    env_file:
+      - .env.docker
+    depends_on:
+      opensearch:
+        condition: service_healthy
+    ports:
+      - "8501:8501"
+    environment:
+      OPENSEARCH_URL: http://opensearch:9200
+      INDEX_NAME: pega-logs
+
+networks:
+  default:
+    name: log_troubleshooter_net

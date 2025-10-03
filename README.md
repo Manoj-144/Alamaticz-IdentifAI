@@ -13,6 +13,7 @@ A lightweight Python tool to assist in quickly scanning log files, highlighting 
 - Web search for fixes (Pega Community, docs, etc.)
 - Feedback capture stored to S3 (if configured)
 - Sensitive value masking before sending to AI models
+- Containerized deployment (Docker) with CI image publishing
 
 ## Tech Stack / Key Libraries
 | Purpose | Library |
@@ -30,7 +31,7 @@ A lightweight Python tool to assist in quickly scanning log files, highlighting 
 See `requirements.txt` for the complete list.
 
 ## Prerequisites
-- Python 3.10+ (recommended)
+- Python 3.10+ (recommended) OR Docker
 - An OpenSearch endpoint (set OPENSEARCH_URL, OPENSEARCH_USER, OPENSEARCH_PASS, INDEX_NAME)
 - OpenAI (or compatible) API key for LLM usage: set `OPENAI_API_KEY`
 - (Optional) AWS credentials + `FEEDBACK_S3_BUCKET` for feedback storage
@@ -70,10 +71,58 @@ notepad .env
 streamlit run Pega_Log_Troubleshooter.py
 ```
 
-## Running on Streamlit Cloud
-1. Push repo with `requirements.txt` and `.streamlit/secrets.toml` (for private credentials) if desired.
-2. Add required environment variables via the Streamlit Cloud settings UI.
-3. Deploy and open the app; missing dependency messages will show inline if something fails.
+## Run with Docker
+Build & run locally (without compose):
+```powershell
+docker build -t log-troubleshooter:local .
+# Pass env vars directly or mount an env file
+$env:OPENAI_API_KEY="sk-..."; docker run --rm -p 8501:8501 `
+  -e OPENAI_API_KEY=$env:OPENAI_API_KEY `
+  -e OPENSEARCH_URL=http://host.docker.internal:9200 `
+  -e OPENSEARCH_USER=admin -e OPENSEARCH_PASS=admin `
+  -e INDEX_NAME=pega-logs log-troubleshooter:local
+```
+Navigate to http://localhost:8501.
+
+## Run Full Stack with docker-compose
+A local OpenSearch + App stack is provided.
+```powershell
+# (Optional) adjust values in .env.docker
+notepad .env.docker
+
+# Start services
+docker compose up --build
+
+# Tear down
+docker compose down -v
+```
+App: http://localhost:8501  |  OpenSearch API: http://localhost:9200
+
+## GitHub Container Registry (GHCR) Image
+A GitHub Actions workflow (`.github/workflows/docker-build.yml`) builds and pushes multi-arch images on pushes & PRs to `main`.
+
+Image naming convention:
+```
+ghcr.io/<owner>/log-troubleshooter:latest
+ghcr.io/<owner>/log-troubleshooter:<git-sha7>
+```
+(Optional) Add a `VERSION` file at repo root to set a semantic version tag (e.g., `1.0.0`).
+
+### Pull & Run Published Image
+```powershell
+docker pull ghcr.io/<owner>/log-troubleshooter:latest
+docker run -p 8501:8501 `
+  -e OPENAI_API_KEY=sk-... `
+  -e OPENSEARCH_URL=https://your-opensearch:9200 `
+  -e OPENSEARCH_USER=admin -e OPENSEARCH_PASS=changeme `
+  -e INDEX_NAME=pega-logs ghcr.io/<owner>/log-troubleshooter:latest
+```
+
+## CI/CD Workflow Summary
+- Triggers: push, pull_request on `main`, manual dispatch.
+- Builds multi-arch (amd64 + arm64) image.
+- Tags with `latest` (or `VERSION` file value) and short SHA.
+- Publishes to GHCR using `GITHUB_TOKEN` (no extra secrets needed).
 
 ## Troubleshooting
 | Issue | Cause | Fix |
@@ -83,6 +132,8 @@ streamlit run Pega_Log_Troubleshooter.py
 | Empty query results | Index not created or no matching logs | Upload logs first; check `INDEX_NAME` |
 | LLM errors | Missing `OPENAI_API_KEY` or quota | Set key / verify usage |
 | Feedback not saved | S3 bucket or IAM misconfigured | Check bucket name, region, IAM policy |
+| Docker healthcheck failing | App not starting or port blocked | Check logs: `docker logs <container>` |
+| Compose app waits forever | OpenSearch not healthy yet | Ensure sufficient memory (≥2GB) for OpenSearch |
 
 ## Usage Flow
 1. Launch app.
@@ -99,7 +150,7 @@ streamlit run Pega_Log_Troubleshooter.py
 ## Security & Privacy Notes
 - Basic masking applied to emails, URLs, IPs, hostnames, and IDs before LLM calls.
 - Review masking patterns in `mask_sensitive_data` for your environment; extend as needed.
-- Do NOT commit real credentials—use `.env` locally and secrets manager in production.
+- Do NOT commit real credentials—use `.env` locally, `.env.docker` for compose (avoid pushing secrets), and GH secrets for production.
 
 ## Roadmap Ideas
 - Add unit tests for masking and SQL rewrite logic
@@ -107,9 +158,10 @@ streamlit run Pega_Log_Troubleshooter.py
 - Add pagination & sorting in log table
 - Support multi-session search history
 - Add retry/backoff for OpenSearch failures
+- Add automated security scanning (Dependabot, Trivy)
 
 ## License
 Currently internal / unspecified. Add appropriate license before distribution.
 
 ---
-Enhanced documentation including dependency & setup instructions.
+Enhanced documentation including dependency, containerization & CI instructions.
