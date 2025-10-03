@@ -1,5 +1,5 @@
 version: 1.0
-runtime: python3.11
+runtime: dockerfile
 build:
   commands:
     - pip3 install --no-cache-dir --upgrade pip
