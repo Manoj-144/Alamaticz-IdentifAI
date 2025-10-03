@@ -1,8 +1,2 @@
 version: 1.0
 runtime: dockerfile
-build:
-  commands:
-    - pip3 install --no-cache-dir --upgrade pip
-    - pip3 install --no-cache-dir -r requirements.txt
-run:
-  command: streamlit run Pega_Log_Troubleshooter.py --server.port 8080 --server.headless true --server.address 0.0.0.0
