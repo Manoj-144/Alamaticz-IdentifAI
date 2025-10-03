@@ -1,0 +1,44 @@
+/* ===== Scoped Log Table Styles (extracted) ===== */
+html, body, .block-container { overflow-x: hidden; }
+.log-table-wrapper { max-height:600px; overflow:auto; overflow-x:scroll; border:1px solid #d9d9d9; border-radius:6px; background:#fff; padding:0; position:relative; }
+.log-table-wrapper:after { content:""; position:absolute; top:0; right:0; width:24px; height:100%; pointer-events:none; background:linear-gradient(to right, rgba(255,255,255,0), #fff 70%); }
+.log-table-inner { width:max-content; min-width:100%; }
+.lt-header, .lt-row { display:flex; flex-wrap:nowrap; align-items:stretch; }
+.lt-header { position:sticky; top:0; background:#f5f5f5; font-weight:600; border-bottom:1px solid #d0d0d0; z-index:2; }
+.lt-header .lt-cell { white-space:nowrap; }
+.lt-row { border-bottom:1px solid #e8e8e8; }
+.lt-row:nth-child(even) { background:#fafafa; }
+.lt-row:hover { background:#f0f7ff; }
+.lt-cell { padding:6px 8px; min-width:140px; border-right:1px solid #e3e3e3; font-size:0.82rem; white-space:pre-wrap; word-break:break-word; flex:0 0 auto; }
+.lt-cell:last-child { border-right:none; }
+.lt-cell.message { min-width:420px; flex:0 0 420px; }
+.lt-cell.actions { min-width:56px; text-align:center; padding:4px 4px; }
+.lt-cell.actions button { width:100%; font-size:0.75rem; }
+.lt-level-ERROR { color:#c40000; font-weight:600; }
+.lt-level-WARN { color:#b58105; font-weight:600; }
+.lt-stack { font-family:monospace; font-size:0.7rem; color:#444; }
+/* Pure table layout */
+.log-scroll-wrapper { max-height:600px; overflow:auto; border:1px solid #d9d9d9; border-radius:6px; background:#fff; }
+table.log-html-table { border-collapse:separate; border-spacing:0; font-size:0.82rem; }
+table.log-html-table thead th { position:sticky; top:0; background:#f5f5f5; font-weight:600; border-bottom:1px solid #d0d0d0; text-align:left; padding:6px 8px; white-space:nowrap; z-index:3; }
+table.log-html-table tbody td { padding:6px 8px; vertical-align:top; border-bottom:1px solid #e8e8e8; border-right:1px solid #eee; background:#fff; }
+table.log-html-table tbody tr:nth-child(even) td { background:#fafafa; }
+table.log-html-table tbody tr:hover td { background:#f0f7ff; }
+table.log-html-table td.message { min-width:420px; }
+table.log-html-table td.stack { font-family:monospace; font-size:0.7rem; }
+table.log-html-table td, table.log-html-table th { min-width:140px; word-break:break-word; }
+table.log-html-table th.actions, table.log-html-table td.actions { min-width:70px; text-align:center; }
+.action-btn { display:inline-block; padding:4px 8px; border:1px solid #c5c5c5; border-radius:4px; background:#ffffff; text-decoration:none; font-size:0.75rem; line-height:1; }
+.action-btn:hover { background:#e6f3ff; border-color:#8fbce6; }
+.action-btn.diag { color:#8a2d00; }
+.action-btn.web { color:#005d99; }
+.action-btn.disabled { opacity:0.35; pointer-events:none; }
+.level-badge-ERROR { color:#c40000; font-weight:600; }
+.level-badge-WARN { color:#b58105; font-weight:600; }
+.log-table-wrapper::-webkit-scrollbar { height:10px; width:10px; }
+.log-table-wrapper::-webkit-scrollbar-track { background:#f2f2f2; }
+.log-table-wrapper::-webkit-scrollbar-thumb { background:#c5c5c5; border-radius:6px; }
+.log-table-wrapper::-webkit-scrollbar-thumb:hover { background:#b0b0b0; }
+div[data-testid="stStatusWidget"] { font-size:0.85rem; }
+/* Masked preview styling */
+.masked-preview pre { font-size:0.7rem; line-height:1.1; }

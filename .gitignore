@@ -1,0 +1,31 @@
+# Ignore Python virtual environment folders
+venv/
+.venv/
+.env/
+
+# Ignore environment variable files (keep secrets local)
+.env
+.env.*
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+
+# Logs (ignore all logs and the Pega Logs directory)
+*.log
+Pega Logs/
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
