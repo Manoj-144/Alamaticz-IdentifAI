@@ -1,56 +1,12 @@
-###############################################################################
-# Python Dependencies for AI Log Troubleshooter (AWS App Runner Compatible)
-# ---------------------------------------------------------------------------
-# Notes:
-# 1. Pinned versions ensure reproducible builds in AWS App Runner.
-# 2. Only direct (imported) libraries are listed. Transitive deps resolved by pip.
-# 3. You may update versions periodically; keep major versions stable unless needed.
-# 4. Remove/adjust any library you don't actively use to speed cold starts.
-###############################################################################
-
-# Core App / UI
-streamlit==1.38.0          # Web UI framework
-
-# OpenSearch client
-opensearch-py==2.7.1       # OpenSearch Python SDK
-
-# Environment variable loading
-python-dotenv==1.0.1       # For .env file support
-
-# HTTP utilities
-requests==2.32.3           # HTTP client (also used by OpenAI + OpenSearch)
-
-# Data processing
-pandas==2.2.2              # DataFrame operations for query results
-
-# AWS integrations (S3 feedback storage, credentials chain)
-boto3==1.35.0              # AWS SDK for Python
-
-# LLM / Agent Framework
-crewai==0.35.0             # CrewAI orchestration (adjust if your project uses a different version)
-crewai-tools==0.5.0        # Tooling package (SerperDevTool, etc.)
-
-# LangChain Ecosystem
-langchain==0.2.11          # Core LangChain primitives (memory, schema, etc.)
-langchain-openai==0.1.8    # OpenAI chat model integration
-openai==1.40.2             # OpenAI Python SDK (needed explicitly in some deployments)
-
-# SQLite compatibility layer (optional but helps avoid missing sqlite3 issues in some containers)
-pysqlite3-binary==0.5.3    # Provides pysqlite3 module mapped to sqlite3
-
-# (Optional) Add if you encounter SSL / cert issues with OpenSearch or requests
-# certifi==2024.7.4
-# urllib3==2.2.2
-
-# (Optional) Performance / smaller footprint tweaks
-# orjson==3.10.7            # Faster JSON (can swap json.loads/dumps selectively)
-
-# (Optional) Debug / tracing
-# rich==13.7.1
-
-# ----- Deployment Footnotes -----
-# If App Runner build size/time becomes large, consider:
-# - Removing crewai / langchain if only using raw OpenAI calls.
-# - Freezing a lock file via `pip freeze > requirements.lock` and referencing it.
-# - Using environment variables for model names; ensure they are set in App Runner.
-
+streamlit==1.38.0
+opensearch-py==2.7.1
+python-dotenv==1.0.1
+requests==2.32.3
+pandas==2.2.2
+boto3==1.35.0
+crewai==0.35.0
+crewai-tools==0.5.0
+langchain==0.2.11
+langchain-openai==0.1.8
+openai==1.40.2
+pysqlite3-binary==0.5.3
