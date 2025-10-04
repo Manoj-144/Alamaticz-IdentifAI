@@ -910,16 +910,17 @@ def execute_log_query(user_query: str):
     start_time = time.time()
     sql_tool.session_id = st.session_state.session_id
     
+
     try:
         # Pass the query with any context directly to SQL agent
         search_task = Task(
-            description=f"Create and execute OpenSearch SQL query for: '{user_query}'. Return exact tool output without any LLM processing.", 
-            expected_output="Raw tool execution results - return the exact data from the tool", 
+            description=f"Create and execute OpenSearch SQL query for: '{user_query}'. Return exact tool output without any LLM processing.",
+            expected_output="Raw tool execution results - return the exact data from the tool",
             agent=sql_query_builder_agent
         )
         crew_search = Crew(agents=[sql_query_builder_agent], tasks=[search_task], verbose=False)
         results = crew_search.kickoff()
-        
+
         processing_time = time.time() - start_time
         raw_output = getattr(results, 'raw', results)
         if isinstance(raw_output, list):
@@ -948,7 +949,7 @@ def execute_log_query(user_query: str):
                     data = []
         else:
             data = []
-        
+
         # If user asked for a count
         if any(keyword in user_query.lower() for keyword in ["count", "how many", "total errors", "number of errors"]):
             # Check if data contains direct count result
@@ -956,32 +957,42 @@ def execute_log_query(user_query: str):
                 first_item = data[0]
                 for key, value in first_item.items():
                     if 'count' in key.lower() or key == 'COUNT(*)':
-                        return f" There are **{value}** total logs matching your criteria.\n⏱️ *Query executed in {processing_time:.2f} seconds*"
-                
+                        # Return as DataFrame for table rendering
+                        df = pd.DataFrame([{key: value}])
+                        st.session_state.last_query_time = processing_time
+                        return df
                 # If no direct count field, create dataframe and count errors
                 df = create_results_dataframe(data)
                 if not df.empty and 'level' in df.columns:
                     if 'error' in user_query.lower():
                         error_count = (df['level'] == 'ERROR').sum()
-                        return f" There are **{error_count}** error logs in the results.\n⏱️ *Query executed in {processing_time:.2f} seconds*"
+                        df_count = pd.DataFrame([{"error_count": error_count}])
+                        st.session_state.last_query_time = processing_time
+                        return df_count
                     else:
-                        return f" There are **{len(df)}** logs matching your criteria.\n⏱️ *Query executed in {processing_time:.2f} seconds*"
+                        df_count = pd.DataFrame([{"log_count": len(df)}])
+                        st.session_state.last_query_time = processing_time
+                        return df_count
                 else:
-                    return f" There are **{len(data)}** logs matching your criteria.\n⏱️ *Query executed in {processing_time:.2f} seconds*"
+                    df_count = pd.DataFrame([{"log_count": len(data)}])
+                    st.session_state.last_query_time = processing_time
+                    return df_count
             else:
-                return f" There are **0** logs matching your criteria.\n⏱️ *Query executed in {processing_time:.2f} seconds*"
-        
+                df_count = pd.DataFrame([{"log_count": 0}])
+                st.session_state.last_query_time = processing_time
+                return df_count
+
         # For non-count queries, proceed as before
         if not data or not isinstance(data, list) or (isinstance(data, list) and not data):
             return f" Query successful, but no matching records found.\n⏱️ *Query executed in {processing_time:.2f} seconds*"
 
         df = create_results_dataframe(data)
-        
+
         # Store timing in session state for display
         st.session_state.last_query_time = processing_time
-        
+
         return df
-        
+
     except Exception as e:
         return f"❌ Error executing query: {str(e)}"
 
