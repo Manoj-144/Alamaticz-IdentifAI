@@ -1,36 +1,11 @@
-﻿#############################################################
-# Minimal runtime dependencies for AI Log Troubleshooter    #
-# Trimmed for AWS App Runner deployment.                    #
-#                                                          #
-# If you enable new features (e.g. vector stores, PDF       #
-# ingestion, web automation) add the needed libs back.      #
-#############################################################
-
-# Core web app / UI
-streamlit==1.37.1          # UI framework (pin to widely available stable)
-
-# OpenSearch access
-opensearch-py==2.6.0       # Client lib; 3.x requires newer clusters
-
-# LLM orchestration & tools
-crewai==0.41.1             # Stable earlier release (lighter than latest)
-crewai-tools==0.21.0       # SerperDevTool used for web search
-langchain==0.2.16          # Provides memory (ConversationBufferWindowMemory)
-langchain-openai==0.1.20   # ChatOpenAI wrapper
-
-# OpenAI client (pulled transitively, keep explicit for clarity)
+﻿streamlit==1.37.1
+opensearch-py==2.6.0
+crewai==0.41.1
+crewai-tools==0.21.0
+langchain==0.2.16
+langchain-openai==0.1.20
 openai==1.37.0
-
-# Data & utilities
 pandas==2.2.2
 requests==2.32.3
 python-dotenv==1.0.1
-boto3==1.34.131            # S3 feedback storage
-
-# NOTE: Streamlit pulls in needed transitive deps (protobuf, tornado, etc.)
-# Keep this list lean to reduce cold start time & attack surface.
-
-# Optional (uncomment if needed later):
-# rich==13.7.1            # Pretty console output
-# orjson==3.10.3          # Faster JSON (not required now)
-# python-dateutil==2.9.0.post0  # Already indirect via pandas
+boto3==1.34.131
