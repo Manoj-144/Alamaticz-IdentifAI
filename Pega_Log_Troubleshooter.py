@@ -121,8 +121,6 @@ if "last_dataframe" not in st.session_state:
     st.session_state.last_dataframe = None
 if "conversation_topics" not in st.session_state:
     st.session_state.conversation_topics = []
-"""We now use ONLY a single LangChain ConversationBufferWindowMemory (lc_memory) for context.
-   No separate session summaries or extra buffers."""
 if "lc_memory" not in st.session_state:
     st.session_state.lc_memory = ConversationBufferWindowMemory(k=6, memory_key="chat_history", return_messages=True)
 
