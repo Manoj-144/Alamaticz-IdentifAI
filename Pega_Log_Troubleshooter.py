@@ -121,12 +121,10 @@ if "last_dataframe" not in st.session_state:
     st.session_state.last_dataframe = None
 if "conversation_topics" not in st.session_state:
     st.session_state.conversation_topics = []
-if "last_query_context" not in st.session_state:
-    st.session_state.last_query_context = ""
-
-# LangChain memory for follow-up context (window of 4 turns)
+"""We now use ONLY a single LangChain ConversationBufferWindowMemory (lc_memory) for context.
+   No separate session summaries or extra buffers."""
 if "lc_memory" not in st.session_state:
-    st.session_state.lc_memory = ConversationBufferWindowMemory(k=4, return_messages=True)
+    st.session_state.lc_memory = ConversationBufferWindowMemory(k=6, memory_key="chat_history", return_messages=True)
 
 
 # --- Data Masking Function ---
@@ -448,12 +446,7 @@ sql_query_builder_agent = Agent(
               "   - Priority Columns: `log.timestamp`, `log.app`, `log.level`, `log.message`, `log.exception.exception_class`, `log.exception.exception_message`, `log.stack`, `log.RequestorId`, `log.CorrelationId`."
               "   - Example: `SELECT `log.timestamp`, `log.app`, `log.level`, `log.message`, `log.stack`, `log.exception.exception_class`, `log.exception.exception_message` FROM `pega-logs` WHERE `log.level` = 'ERROR'`"
               " Always include stack column"
-
           "2. TO COUNT DATA ('how many', 'count', 'total', 'number of'): Use `COUNT(*)`. NEVER count a `text` field."
-              "   - For error counts: `SELECT COUNT(*) FROM `pega-logs` WHERE `log.level` = 'ERROR'`"
-              "   - For all logs: `SELECT COUNT(*) FROM `pega-logs``"
-              "   - For specific app errors: `SELECT COUNT(*) FROM `pega-logs` WHERE `log.level` = 'ERROR' AND `log.app` = 'MyApp'`"
-
           "3. TO FIND UNIQUE ERRORS ('unique', 'distinct', 'group by'): Use `GROUP BY` on a `keyword` field like `log.exception.exception_class`. NEVER use the `DISTINCT` keyword on `text` fields."
               "   - Example: `SELECT `log.exception.exception_class`, COUNT(*) FROM `pega-logs` WHERE `log.level` = 'ERROR' GROUP BY `log.exception.exception_class``"
 
@@ -700,11 +693,6 @@ def create_results_dataframe(results_data):
         'RequestorId', 'CorrelationId'
     ]
 
-    # Ensure RequestorId & CorrelationId always exist
-    for _col in ['RequestorId', 'CorrelationId']:
-        if _col not in df.columns:
-            df[_col] = ""
-
     ordered_cols = [c for c in priority_columns if c in df.columns] + \
                      [c for c in df.columns if c not in priority_columns]
     df = df[ordered_cols]
@@ -716,7 +704,7 @@ def create_results_dataframe(results_data):
     return df
 
 def orchestrator_handle_user_input(user_input: str):
-    """Pure intent classification and delegation layer that routes to appropriate agents."""
+    """(LEGACY FALLBACK) Keyword detection if orchestrator LLM fails. Uses only lc_memory."""
     
     # Simple follow-up detection based on keywords
     followup_keywords = [
@@ -730,7 +718,14 @@ def orchestrator_handle_user_input(user_input: str):
     # Get last query context if it's a follow-up
     context = ""
     if is_followup:
-        context = getattr(st.session_state, 'last_query_context', '')
+        # derive lightweight previous context from last lc_memory messages
+        mem = st.session_state.lc_memory.load_memory_variables({}).get("chat_history", [])
+        # take last assistant message summary if present
+        context = ""
+        for m in reversed(mem):
+            if getattr(m, 'type', None) == 'ai' or getattr(m, 'role', '') == 'assistant':
+                context = m.content[:300]
+                break
         print(f"[DEBUG] FOLLOW-UP DETECTED! Context: {context}")
         
     # Determine intent - keep it simple
@@ -782,7 +777,7 @@ def orchestrator_handle_user_input(user_input: str):
             if app_info and len(app_info) <= 3:
                 query_context += f" from apps: {', '.join(app_info)}"
             
-            st.session_state.last_query_context = query_context
+            # store summary as an assistant message in lc_memory (implicit already via save_context below)
             print(f"[DEBUG] Stored context: {query_context}")
             
             # Store the dataframe and return summary
@@ -918,7 +913,11 @@ def execute_log_query(user_query: str):
             expected_output="Raw tool execution results - return the exact data from the tool",
             agent=sql_query_builder_agent
         )
-        crew_search = Crew(agents=[sql_query_builder_agent], tasks=[search_task], verbose=False)
+        crew_search = Crew(
+            agents=[sql_query_builder_agent],
+            tasks=[search_task],
+            verbose=False
+        )
         results = crew_search.kickoff()
 
         processing_time = time.time() - start_time
@@ -950,37 +949,6 @@ def execute_log_query(user_query: str):
         else:
             data = []
 
-        # If user asked for a count
-        if any(keyword in user_query.lower() for keyword in ["count", "how many", "total errors", "number of errors"]):
-            # Check if data contains direct count result
-            if data and isinstance(data, list) and len(data) > 0:
-                first_item = data[0]
-                for key, value in first_item.items():
-                    if 'count' in key.lower() or key == 'COUNT(*)':
-                        # Return as DataFrame for table rendering
-                        df = pd.DataFrame([{key: value}])
-                        st.session_state.last_query_time = processing_time
-                        return df
-                # If no direct count field, create dataframe and count errors
-                df = create_results_dataframe(data)
-                if not df.empty and 'level' in df.columns:
-                    if 'error' in user_query.lower():
-                        error_count = (df['level'] == 'ERROR').sum()
-                        df_count = pd.DataFrame([{"error_count": error_count}])
-                        st.session_state.last_query_time = processing_time
-                        return df_count
-                    else:
-                        df_count = pd.DataFrame([{"log_count": len(df)}])
-                        st.session_state.last_query_time = processing_time
-                        return df_count
-                else:
-                    df_count = pd.DataFrame([{"log_count": len(data)}])
-                    st.session_state.last_query_time = processing_time
-                    return df_count
-            else:
-                df_count = pd.DataFrame([{"log_count": 0}])
-                st.session_state.last_query_time = processing_time
-                return df_count
 
         # For non-count queries, proceed as before
         if not data or not isinstance(data, list) or (isinstance(data, list) and not data):
@@ -1189,10 +1157,112 @@ def main():
             debug_container = st.empty()
             
             try:
+                # --- New Orchestration Flow Using orchestrator_agent ---
+                # Prepare previous context summary for LLM (optional, short)
+                # Build recent transcript from lc_memory instead of last_query_context
+                mem_msgs = st.session_state.lc_memory.load_memory_variables({}).get("chat_history", [])
+                recent_pairs = []
+                for m in mem_msgs[-6:]:
+                    role = getattr(m, 'type', getattr(m, 'role', ''))
+                    if role == 'human' or role == 'user':
+                        role = 'User'
+                    elif role == 'ai' or role == 'assistant':
+                        role = 'Assistant'
+                    else:
+                        role = 'Other'
+                    content = getattr(m, 'content', '')
+                    if len(content) > 300:
+                        content = content[:300] + '…'
+                    recent_pairs.append(f"{role}: {content}")
+                prev_context = "\n".join(recent_pairs) if recent_pairs else "(no prior turns)"
+
+                orchestration_task = Task(
+                    description=(
+                        f"Analyze the user's query: '{prompt}'.\n"
+                        f"Conversation context (recent turns):\n{prev_context}\n"
+                        "Return ONLY a single valid JSON object (no markdown, no backticks, no prose) with exactly these keys: \n"
+                        "intent (string: one of log_query, diagnosis_request, upload_help, feedback, general_chat); \n"
+                        "follow_up (boolean); \n"
+                        "context (string - distilled prior context or 'None'); \n"
+                        "query (string - normalized query to route).\n"
+                        "Example: {\"intent\": \"log_query\", \"follow_up\": true, \"context\": \"Previous query returned 5 logs\", \"query\": \"count error logs\"}.\n"
+                        "If unsure, default intent to 'general_chat', follow_up false, context 'None', query equal to the raw user query."
+                    ),
+                    expected_output="A single JSON object with keys: intent (str), follow_up (bool), context (str), query (str).",
+                    agent=orchestrator_agent
+                )
+
+                crew_orchestrate = Crew(
+                    agents=[orchestrator_agent],
+                    tasks=[orchestration_task],
+                    verbose=False
+                )
+
+                orchestration_result = crew_orchestrate.kickoff()
+                raw_orchestration = str(orchestration_result)
+
+                # Parse JSON structured response
+                intent = "general_chat"
+                follow_up = False
+                parsed_context = "None"
+                routed_query = prompt
+                try:
+                    parsed_result = json.loads(raw_orchestration)
+                    intent = str(parsed_result.get('intent', 'general_chat')).lower()
+                    follow_up = bool(parsed_result.get('follow_up', False))
+                    parsed_context = parsed_result.get('context', 'None') or 'None'
+                    routed_query = parsed_result.get('query', prompt) or prompt
+                    debug_container.markdown(
+                        "🧭 **Routing Debug (JSON)**\n\n" +
+                        f"intent={intent} | follow_up={follow_up} | context={parsed_context} | query={routed_query}"
+                    )
+                except json.JSONDecodeError as parse_err:
+                    debug_container.markdown(
+                        f"⚠️ JSON Parsing Error: {parse_err}. Raw output shown below:\n\n```\n{raw_orchestration}\n```"
+                    )
+
+                # Route based on intent
+                df_json = None
+                if intent == 'log_query':
+                    # Merge context if follow-up
+                    routed_with_context = routed_query
+                    if follow_up and parsed_context and parsed_context.lower() != 'none':
+                        routed_with_context = f"Context from previous conversation: {parsed_context}\nUser Query: {routed_query}"
+                    result = execute_log_query(routed_with_context)
+                    if isinstance(result, pd.DataFrame):
+                        # Build & store context summary for next turn
+                        level_counts = result['level'].value_counts().to_dict() if 'level' in result.columns else {}
+                        summary = f"Previous query returned {len(result)} logs"
+                        if level_counts:
+                            lvl_parts = [f"{cnt} {lvl}" for lvl, cnt in level_counts.items()]
+                            summary += " with " + ", ".join(lvl_parts)
+                        # summary automatically retained through lc_memory save below
+                        df_json = result.to_json(orient='records')
+                        content = f"📊 **Query Results:** Found {len(result)} logs."
+                    else:
+                        content = str(result)
+                elif intent == 'diagnosis_request':
+                    content = "To diagnose an error, click the '🔧 Diagnose' button next to an error row above."
+                elif intent == 'upload_help':
+                    content = (
+                        "**How to Upload Logs:**\n\n1. Use the file uploader in the left sidebar\n2. Select a JSON log file (.json, .jsonl, .log, .txt)\n3. Click 'Upload & Process Logs'\n4. Wait for indexing\n5. Ask questions about your logs."
+                    )
+                elif intent == 'feedback':
+                    content = "Thanks for your feedback! Use the 👍 or 👎 buttons under a response to rate it."
+                else:
+                    content = "I'm ready to help analyze your logs. Ask a question like 'Show error logs from today'."
+
+                # Save conversation into both memories
+                st.session_state.lc_memory.save_context({"input": prompt}, {"output": content})
+
+            except Exception as orchestration_error:
+                # Fallback to deprecated function
+                fallback_msg = f"⚠️ Orchestration fallback due to error: {orchestration_error}. Using legacy keyword logic."
+                debug_container.markdown(fallback_msg)
                 content, df_json = orchestrator_handle_user_input(prompt)
             finally:
                 thinking.empty()
-                
+
             st.markdown(content)
             msg = {"role": "assistant", "content": content, "id": str(uuid.uuid4())}
             if df_json:

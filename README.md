@@ -8,7 +8,8 @@ A lightweight Python tool to assist in quickly scanning log files, highlighting 
 ## Features
 - Upload JSON / JSONL Pega logs and query them in natural language
 - Automatic OpenSearch indexing + SQL-style querying (filtered per session)
-- Follow-up question memory (context-aware queries)
+- Structured intent orchestration (LLM-based) for routing & follow-up detection
+- Follow-up question memory (CrewAI + LangChain windowed context)
 - Inline error root cause diagnosis (LLM powered)
 - Web search for fixes (Pega Community, docs, etc.)
 - Feedback capture stored to S3 (if configured)
@@ -87,6 +88,18 @@ streamlit run Pega_Log_Troubleshooter.py
 	- "count errors"
 	- "group by app"
 	- Follow-up: "how many debug in previous result"
+4. Internally, your message is first analyzed by an Orchestrator agent which returns a compact, machine-parsable block:
+```
+INTENT: log_query
+FOLLOW_UP: true
+CONTEXT: Previous query returned 42 logs with 10 ERROR, 5 WARN
+QUERY: how many debug logs
+```
+5. If FOLLOW_UP is true, the CONTEXT plus QUERY are merged and sent to the SQL Query Builder agent; otherwise the QUERY alone is used.
+6. A concise summary of the latest dataset (count + level distribution) is stored as `last_query_context` for the next turn.
+7. Click 🔧 Diagnose for targeted root cause analysis.
+8. Click 🌐 Search Web to pull possible documented solutions.
+9. Provide feedback via 👍 / 👎 to store structured review in S3.
 4. Click 🔧 Diagnose for targeted root cause analysis.
 5. Click 🌐 Search Web to pull possible documented solutions.
 6. Provide feedback via 👍 / 👎 to store structured review in S3.
@@ -98,6 +111,7 @@ streamlit run Pega_Log_Troubleshooter.py
 
 ## Roadmap Ideas
 - Add unit tests for masking and SQL rewrite logic
+- Persist orchestrator memory across browser refresh (optional encrypted store)
 - Version pin dependencies for reproducibility
 - Add pagination & sorting in log table
 - Support multi-session search history
