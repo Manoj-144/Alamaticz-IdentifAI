@@ -1,5 +1,6 @@
 ﻿streamlit
 opensearch-py
+requests-aws4auth
 crewai
 crewai-tools
 langchain==0.1.20

@@ -12,7 +12,8 @@ from opensearchpy import exceptions
 import streamlit as st
 import uuid
 from dotenv import load_dotenv
-from opensearchpy import OpenSearch, helpers
+from opensearchpy import OpenSearch, helpers, RequestsHttpConnection
+from requests_aws4auth import AWS4Auth
 from crewai import Agent, Task, Crew
 from crewai_tools import SerperDevTool
 from crewai.tools import BaseTool
@@ -48,10 +49,11 @@ Orchestrator_llm = ChatOpenAI(
 )
 
 
-OPENSEARCH_URL = os.environ.get("OPENSEARCH_URL")
+OPENSEARCH_URL = os.environ.get("OPENSEARCH_URL","https://search-alamaticz-identifai-db-e6zsuwdvxptxtfwgf5qcdxj7qy.aos.us-east-1.on.aws")
 OPENSEARCH_USER = os.environ.get("OPENSEARCH_USER")
 OPENSEARCH_PASS = os.environ.get("OPENSEARCH_PASS")
 INDEX_NAME = os.environ.get("INDEX_NAME")
+AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")  # Add region config
 
 # --- Silence warnings ---
 warnings.filterwarnings("ignore", category=DeprecationWarning)
@@ -65,16 +67,67 @@ except RuntimeError:
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
-# --- OpenSearch Client ---
-client = OpenSearch(
-        hosts=[OPENSEARCH_URL],
-        http_auth=(OPENSEARCH_USER, OPENSEARCH_PASS),
-        verify_certs=False,
-        ssl_show_warn=False,
-        timeout=30,
-        max_retries=3,
-        retry_on_timeout=True
-    )
+# --- OpenSearch Client with AWS4Auth for Fine-Grained Access Control ---
+def create_opensearch_client():
+    """Create OpenSearch client with proper authentication"""
+    if not OPENSEARCH_URL:
+        return None
+    
+    # Check if using AWS credentials or master username/password
+    aws_access_key = os.environ.get("AWS_ACCESS_KEY_ID")
+    aws_secret_key = os.environ.get("AWS_SECRET_ACCESS_KEY")
+    
+    # Parse the host from URL (remove https://)
+    host = OPENSEARCH_URL.replace('https://', '').replace('http://', '')
+    
+    if aws_access_key and aws_secret_key:
+        # Use AWS4Auth for IAM-based authentication
+        awsauth = AWS4Auth(
+            aws_access_key,
+            aws_secret_key,
+            AWS_REGION,
+            'es',  # service name
+            session_token=os.environ.get("AWS_SESSION_TOKEN")
+        )
+        
+        client = OpenSearch(
+            hosts=[{'host': host, 'port': 443}],
+            http_auth=awsauth,
+            use_ssl=True,
+            verify_certs=True,
+            connection_class=RequestsHttpConnection,
+            timeout=30,
+            max_retries=3,
+            retry_on_timeout=True
+        )
+    elif OPENSEARCH_USER and OPENSEARCH_PASS:
+        # Use basic auth for master username/password
+        # Note: For FGAC with master user, you need to connect to the endpoint with proper SSL
+        client = OpenSearch(
+            hosts=[{'host': host, 'port': 443}],
+            http_auth=(OPENSEARCH_USER, OPENSEARCH_PASS),
+            use_ssl=True,
+            verify_certs=True,  # Set to True for production
+            ssl_show_warn=False,
+            connection_class=RequestsHttpConnection,
+            timeout=30,
+            max_retries=3,
+            retry_on_timeout=True
+        )
+    else:
+        # Fallback to no auth (for local development)
+        client = OpenSearch(
+            hosts=[host],
+            verify_certs=False,
+            ssl_show_warn=False,
+            timeout=30,
+            max_retries=3,
+            retry_on_timeout=True
+        )
+    
+    return client
+
+client = create_opensearch_client()
 
 # --- Streamlit Configuration ---
 st.set_page_config(
