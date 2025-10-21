@@ -2,7 +2,7 @@
 opensearch-py
 crewai
 crewai-tools
-langchain
+langchain==0.1.20
 langchain-openai
 openai
 pandas
