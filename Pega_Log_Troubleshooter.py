@@ -12,8 +12,7 @@ from opensearchpy import exceptions
 import streamlit as st
 import uuid
 from dotenv import load_dotenv
-from opensearchpy import OpenSearch, helpers, RequestsHttpConnection
-from requests_aws4auth import AWS4Auth
+from opensearchpy import OpenSearch, helpers
 from crewai import Agent, Task, Crew
 from crewai_tools import SerperDevTool
 from crewai.tools import BaseTool
@@ -49,11 +48,10 @@ Orchestrator_llm = ChatOpenAI(
 )
 
 
-OPENSEARCH_URL = os.environ.get("OPENSEARCH_URL","https://search-alamaticz-identifai-db-e6zsuwdvxptxtfwgf5qcdxj7qy.aos.us-east-1.on.aws")
+OPENSEARCH_URL = os.environ.get("OPENSEARCH_URL")
 OPENSEARCH_USER = os.environ.get("OPENSEARCH_USER")
 OPENSEARCH_PASS = os.environ.get("OPENSEARCH_PASS")
 INDEX_NAME = os.environ.get("INDEX_NAME")
-AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")  # Add region config
 
 # --- Silence warnings ---
 warnings.filterwarnings("ignore", category=DeprecationWarning)
@@ -67,67 +65,16 @@ except RuntimeError:
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
-# --- OpenSearch Client with AWS4Auth for Fine-Grained Access Control ---
-def create_opensearch_client():
-    """Create OpenSearch client with proper authentication"""
-    if not OPENSEARCH_URL:
-        return None
-    
-    # Check if using AWS credentials or master username/password
-    aws_access_key = os.environ.get("AWS_ACCESS_KEY_ID")
-    aws_secret_key = os.environ.get("AWS_SECRET_ACCESS_KEY")
-    
-    # Parse the host from URL (remove https://)
-    host = OPENSEARCH_URL.replace('https://', '').replace('http://', '')
-    
-    if aws_access_key and aws_secret_key:
-        # Use AWS4Auth for IAM-based authentication
-        awsauth = AWS4Auth(
-            aws_access_key,
-            aws_secret_key,
-            AWS_REGION,
-            'es',  # service name
-            session_token=os.environ.get("AWS_SESSION_TOKEN")
-        )
-        
-        client = OpenSearch(
-            hosts=[{'host': host, 'port': 443}],
-            http_auth=awsauth,
-            use_ssl=True,
-            verify_certs=True,
-            connection_class=RequestsHttpConnection,
-            timeout=30,
-            max_retries=3,
-            retry_on_timeout=True
-        )
-    elif OPENSEARCH_USER and OPENSEARCH_PASS:
-        # Use basic auth for master username/password
-        # Note: For FGAC with master user, you need to connect to the endpoint with proper SSL
-        client = OpenSearch(
-            hosts=[{'host': host, 'port': 443}],
-            http_auth=(OPENSEARCH_USER, OPENSEARCH_PASS),
-            use_ssl=True,
-            verify_certs=True,  # Set to True for production
-            ssl_show_warn=False,
-            connection_class=RequestsHttpConnection,
-            timeout=30,
-            max_retries=3,
-            retry_on_timeout=True
-        )
-    else:
-        # Fallback to no auth (for local development)
-        client = OpenSearch(
-            hosts=[host],
-            verify_certs=False,
-            ssl_show_warn=False,
-            timeout=30,
-            max_retries=3,
-            retry_on_timeout=True
-        )
-    
-    return client
-
-client = create_opensearch_client()
+# --- OpenSearch Client ---
+client = OpenSearch(
+        hosts=[OPENSEARCH_URL],
+        http_auth=(OPENSEARCH_USER, OPENSEARCH_PASS),
+        verify_certs=False,
+        ssl_show_warn=False,
+        timeout=30,
+        max_retries=3,
+        retry_on_timeout=True
+    )
 
 # --- Streamlit Configuration ---
 st.set_page_config(
@@ -174,8 +121,12 @@ if "last_dataframe" not in st.session_state:
     st.session_state.last_dataframe = None
 if "conversation_topics" not in st.session_state:
     st.session_state.conversation_topics = []
+if "last_query_context" not in st.session_state:
+    st.session_state.last_query_context = ""
+
+# LangChain memory for follow-up context (window of 4 turns)
 if "lc_memory" not in st.session_state:
-    st.session_state.lc_memory = ConversationBufferWindowMemory(k=6, memory_key="chat_history", return_messages=True)
+    st.session_state.lc_memory = ConversationBufferWindowMemory(k=4, return_messages=True)
 
 
 # --- Data Masking Function ---
@@ -497,7 +448,12 @@ sql_query_builder_agent = Agent(
               "   - Priority Columns: `log.timestamp`, `log.app`, `log.level`, `log.message`, `log.exception.exception_class`, `log.exception.exception_message`, `log.stack`, `log.RequestorId`, `log.CorrelationId`."
               "   - Example: `SELECT `log.timestamp`, `log.app`, `log.level`, `log.message`, `log.stack`, `log.exception.exception_class`, `log.exception.exception_message` FROM `pega-logs` WHERE `log.level` = 'ERROR'`"
               " Always include stack column"
+
           "2. TO COUNT DATA ('how many', 'count', 'total', 'number of'): Use `COUNT(*)`. NEVER count a `text` field."
+              "   - For error counts: `SELECT COUNT(*) FROM `pega-logs` WHERE `log.level` = 'ERROR'`"
+              "   - For all logs: `SELECT COUNT(*) FROM `pega-logs``"
+              "   - For specific app errors: `SELECT COUNT(*) FROM `pega-logs` WHERE `log.level` = 'ERROR' AND `log.app` = 'MyApp'`"
+
           "3. TO FIND UNIQUE ERRORS ('unique', 'distinct', 'group by'): Use `GROUP BY` on a `keyword` field like `log.exception.exception_class`. NEVER use the `DISTINCT` keyword on `text` fields."
               "   - Example: `SELECT `log.exception.exception_class`, COUNT(*) FROM `pega-logs` WHERE `log.level` = 'ERROR' GROUP BY `log.exception.exception_class``"
 
@@ -744,6 +700,11 @@ def create_results_dataframe(results_data):
         'RequestorId', 'CorrelationId'
     ]
 
+    # Ensure RequestorId & CorrelationId always exist
+    for _col in ['RequestorId', 'CorrelationId']:
+        if _col not in df.columns:
+            df[_col] = ""
+
     ordered_cols = [c for c in priority_columns if c in df.columns] + \
                      [c for c in df.columns if c not in priority_columns]
     df = df[ordered_cols]
@@ -755,7 +716,7 @@ def create_results_dataframe(results_data):
     return df
 
 def orchestrator_handle_user_input(user_input: str):
-    """(LEGACY FALLBACK) Keyword detection if orchestrator LLM fails. Uses only lc_memory."""
+    """Pure intent classification and delegation layer that routes to appropriate agents."""
     
     # Simple follow-up detection based on keywords
     followup_keywords = [
@@ -769,14 +730,7 @@ def orchestrator_handle_user_input(user_input: str):
     # Get last query context if it's a follow-up
     context = ""
     if is_followup:
-        # derive lightweight previous context from last lc_memory messages
-        mem = st.session_state.lc_memory.load_memory_variables({}).get("chat_history", [])
-        # take last assistant message summary if present
-        context = ""
-        for m in reversed(mem):
-            if getattr(m, 'type', None) == 'ai' or getattr(m, 'role', '') == 'assistant':
-                context = m.content[:300]
-                break
+        context = getattr(st.session_state, 'last_query_context', '')
         print(f"[DEBUG] FOLLOW-UP DETECTED! Context: {context}")
         
     # Determine intent - keep it simple
@@ -828,7 +782,7 @@ def orchestrator_handle_user_input(user_input: str):
             if app_info and len(app_info) <= 3:
                 query_context += f" from apps: {', '.join(app_info)}"
             
-            # store summary as an assistant message in lc_memory (implicit already via save_context below)
+            st.session_state.last_query_context = query_context
             print(f"[DEBUG] Stored context: {query_context}")
             
             # Store the dataframe and return summary
@@ -956,21 +910,16 @@ def execute_log_query(user_query: str):
     start_time = time.time()
     sql_tool.session_id = st.session_state.session_id
     
-
     try:
         # Pass the query with any context directly to SQL agent
         search_task = Task(
-            description=f"Create and execute OpenSearch SQL query for: '{user_query}'. Return exact tool output without any LLM processing.",
-            expected_output="Raw tool execution results - return the exact data from the tool",
+            description=f"Create and execute OpenSearch SQL query for: '{user_query}'. Return exact tool output without any LLM processing.", 
+            expected_output="Raw tool execution results - return the exact data from the tool", 
             agent=sql_query_builder_agent
         )
-        crew_search = Crew(
-            agents=[sql_query_builder_agent],
-            tasks=[search_task],
-            verbose=False
-        )
+        crew_search = Crew(agents=[sql_query_builder_agent], tasks=[search_task], verbose=False)
         results = crew_search.kickoff()
-
+        
         processing_time = time.time() - start_time
         raw_output = getattr(results, 'raw', results)
         if isinstance(raw_output, list):
@@ -999,19 +948,40 @@ def execute_log_query(user_query: str):
                     data = []
         else:
             data = []
-
-
+        
+        # If user asked for a count
+        if any(keyword in user_query.lower() for keyword in ["count", "how many", "total errors", "number of errors"]):
+            # Check if data contains direct count result
+            if data and isinstance(data, list) and len(data) > 0:
+                first_item = data[0]
+                for key, value in first_item.items():
+                    if 'count' in key.lower() or key == 'COUNT(*)':
+                        return f" There are **{value}** total logs matching your criteria.\n⏱️ *Query executed in {processing_time:.2f} seconds*"
+                
+                # If no direct count field, create dataframe and count errors
+                df = create_results_dataframe(data)
+                if not df.empty and 'level' in df.columns:
+                    if 'error' in user_query.lower():
+                        error_count = (df['level'] == 'ERROR').sum()
+                        return f" There are **{error_count}** error logs in the results.\n⏱️ *Query executed in {processing_time:.2f} seconds*"
+                    else:
+                        return f" There are **{len(df)}** logs matching your criteria.\n⏱️ *Query executed in {processing_time:.2f} seconds*"
+                else:
+                    return f" There are **{len(data)}** logs matching your criteria.\n⏱️ *Query executed in {processing_time:.2f} seconds*"
+            else:
+                return f" There are **0** logs matching your criteria.\n⏱️ *Query executed in {processing_time:.2f} seconds*"
+        
         # For non-count queries, proceed as before
         if not data or not isinstance(data, list) or (isinstance(data, list) and not data):
             return f" Query successful, but no matching records found.\n⏱️ *Query executed in {processing_time:.2f} seconds*"
 
         df = create_results_dataframe(data)
-
+        
         # Store timing in session state for display
         st.session_state.last_query_time = processing_time
-
+        
         return df
-
+        
     except Exception as e:
         return f"❌ Error executing query: {str(e)}"
 
@@ -1208,112 +1178,10 @@ def main():
             debug_container = st.empty()
             
             try:
-                # --- New Orchestration Flow Using orchestrator_agent ---
-                # Prepare previous context summary for LLM (optional, short)
-                # Build recent transcript from lc_memory instead of last_query_context
-                mem_msgs = st.session_state.lc_memory.load_memory_variables({}).get("chat_history", [])
-                recent_pairs = []
-                for m in mem_msgs[-6:]:
-                    role = getattr(m, 'type', getattr(m, 'role', ''))
-                    if role == 'human' or role == 'user':
-                        role = 'User'
-                    elif role == 'ai' or role == 'assistant':
-                        role = 'Assistant'
-                    else:
-                        role = 'Other'
-                    content = getattr(m, 'content', '')
-                    if len(content) > 300:
-                        content = content[:300] + '…'
-                    recent_pairs.append(f"{role}: {content}")
-                prev_context = "\n".join(recent_pairs) if recent_pairs else "(no prior turns)"
-
-                orchestration_task = Task(
-                    description=(
-                        f"Analyze the user's query: '{prompt}'.\n"
-                        f"Conversation context (recent turns):\n{prev_context}\n"
-                        "Return ONLY a single valid JSON object (no markdown, no backticks, no prose) with exactly these keys: \n"
-                        "intent (string: one of log_query, diagnosis_request, upload_help, feedback, general_chat); \n"
-                        "follow_up (boolean); \n"
-                        "context (string - distilled prior context or 'None'); \n"
-                        "query (string - normalized query to route).\n"
-                        "Example: {\"intent\": \"log_query\", \"follow_up\": true, \"context\": \"Previous query returned 5 logs\", \"query\": \"count error logs\"}.\n"
-                        "If unsure, default intent to 'general_chat', follow_up false, context 'None', query equal to the raw user query."
-                    ),
-                    expected_output="A single JSON object with keys: intent (str), follow_up (bool), context (str), query (str).",
-                    agent=orchestrator_agent
-                )
-
-                crew_orchestrate = Crew(
-                    agents=[orchestrator_agent],
-                    tasks=[orchestration_task],
-                    verbose=False
-                )
-
-                orchestration_result = crew_orchestrate.kickoff()
-                raw_orchestration = str(orchestration_result)
-
-                # Parse JSON structured response
-                intent = "general_chat"
-                follow_up = False
-                parsed_context = "None"
-                routed_query = prompt
-                try:
-                    parsed_result = json.loads(raw_orchestration)
-                    intent = str(parsed_result.get('intent', 'general_chat')).lower()
-                    follow_up = bool(parsed_result.get('follow_up', False))
-                    parsed_context = parsed_result.get('context', 'None') or 'None'
-                    routed_query = parsed_result.get('query', prompt) or prompt
-                    debug_container.markdown(
-                        "🧭 **Routing Debug (JSON)**\n\n" +
-                        f"intent={intent} | follow_up={follow_up} | context={parsed_context} | query={routed_query}"
-                    )
-                except json.JSONDecodeError as parse_err:
-                    debug_container.markdown(
-                        f"⚠️ JSON Parsing Error: {parse_err}. Raw output shown below:\n\n```\n{raw_orchestration}\n```"
-                    )
-
-                # Route based on intent
-                df_json = None
-                if intent == 'log_query':
-                    # Merge context if follow-up
-                    routed_with_context = routed_query
-                    if follow_up and parsed_context and parsed_context.lower() != 'none':
-                        routed_with_context = f"Context from previous conversation: {parsed_context}\nUser Query: {routed_query}"
-                    result = execute_log_query(routed_with_context)
-                    if isinstance(result, pd.DataFrame):
-                        # Build & store context summary for next turn
-                        level_counts = result['level'].value_counts().to_dict() if 'level' in result.columns else {}
-                        summary = f"Previous query returned {len(result)} logs"
-                        if level_counts:
-                            lvl_parts = [f"{cnt} {lvl}" for lvl, cnt in level_counts.items()]
-                            summary += " with " + ", ".join(lvl_parts)
-                        # summary automatically retained through lc_memory save below
-                        df_json = result.to_json(orient='records')
-                        content = f"📊 **Query Results:** Found {len(result)} logs."
-                    else:
-                        content = str(result)
-                elif intent == 'diagnosis_request':
-                    content = "To diagnose an error, click the '🔧 Diagnose' button next to an error row above."
-                elif intent == 'upload_help':
-                    content = (
-                        "**How to Upload Logs:**\n\n1. Use the file uploader in the left sidebar\n2. Select a JSON log file (.json, .jsonl, .log, .txt)\n3. Click 'Upload & Process Logs'\n4. Wait for indexing\n5. Ask questions about your logs."
-                    )
-                elif intent == 'feedback':
-                    content = "Thanks for your feedback! Use the 👍 or 👎 buttons under a response to rate it."
-                else:
-                    content = "I'm ready to help analyze your logs. Ask a question like 'Show error logs from today'."
-
-                # Save conversation into both memories
-                st.session_state.lc_memory.save_context({"input": prompt}, {"output": content})
-
-            except Exception as orchestration_error:
-                # Fallback to deprecated function
-                fallback_msg = f"⚠️ Orchestration fallback due to error: {orchestration_error}. Using legacy keyword logic."
-                debug_container.markdown(fallback_msg)
                 content, df_json = orchestrator_handle_user_input(prompt)
             finally:
                 thinking.empty()
-
+                
             st.markdown(content)
             msg = {"role": "assistant", "content": content, "id": str(uuid.uuid4())}
             if df_json:
